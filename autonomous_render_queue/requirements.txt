@@ -1,0 +1,4 @@
+gradio
+librosa
+gradio_client
+scipy
