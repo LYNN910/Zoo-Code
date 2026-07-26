@@ -5,7 +5,6 @@ import {
   Settings,
   Send,
   Play,
-  Image as ImageIcon,
   Film,
   Video,
   Monitor,
@@ -16,11 +15,32 @@ import {
   Mic,
   MoreHorizontal
 } from "lucide-react";
+import { generateStoryboardImage } from "@/lib/generateImage";
+
+type Message = {
+  id: string;
+  sender: "ai" | "user";
+  text: string;
+  time: string;
+  isGenerating?: boolean;
+};
 
 export default function VibeDirector() {
   const [activeVibe, setActiveVibe] = useState("Cinematic");
   const [intensity, setIntensity] = useState(50);
   const [aspectRatio, setAspectRatio] = useState("16:9");
+
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "1",
+      sender: "ai",
+      text: "Ready to direct. Describe the scene you want to generate.",
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+  ]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   const vibes = [
     { name: "Cinematic", icon: Film },
@@ -28,6 +48,75 @@ export default function VibeDirector() {
     { name: "Anime", icon: Wand2 },
     { name: "Drone", icon: Camera },
   ];
+
+  const handleSend = async () => {
+    if (!input.trim() || isGenerating) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      sender: "user",
+      text: input,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    const loadingMessageId = (Date.now() + 1).toString();
+    const loadingMessage: Message = {
+      id: loadingMessageId,
+      sender: "ai",
+      text: "Processing request...",
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isGenerating: true
+    };
+
+    setMessages(prev => [...prev, userMessage, loadingMessage]);
+    setInput("");
+    setIsGenerating(true);
+    setImageUrl(null); // Clear previous image to show generating state
+
+    try {
+      // 1. Call our Director API to get the detailed prompt
+      const res = await fetch("/api/director", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea: `${input} in a ${activeVibe} style` })
+      });
+
+      if (!res.ok) throw new Error("API request failed");
+
+      const data = await res.json();
+
+      // 2. Generate the image URL using the detailed prompt from LLM
+      const newImageUrl = generateStoryboardImage(data.image_prompt);
+
+      // Pre-load the image to ensure it's ready before showing
+      const img = new Image();
+      img.src = newImageUrl;
+      img.onload = () => {
+         setImageUrl(newImageUrl);
+      };
+
+      // 3. Update the chat with the final response
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === loadingMessageId
+            ? { ...msg, text: `Generated scene based on: ${data.video_prompt}`, isGenerating: false }
+            : msg
+        )
+      );
+
+    } catch (error) {
+      console.error(error);
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === loadingMessageId
+            ? { ...msg, text: "Error: Failed to generate scene.", isGenerating: false }
+            : msg
+        )
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <div className="flex h-screen w-full bg-zinc-950 text-zinc-200 overflow-hidden font-sans">
@@ -41,7 +130,7 @@ export default function VibeDirector() {
             <div className="w-8 h-8 rounded bg-indigo-600 flex items-center justify-center">
               <Camera size={18} className="text-white" />
             </div>
-            <h1 className="font-semibold text-lg tracking-tight text-white">Director's Console</h1>
+            <h1 className="font-semibold text-lg tracking-tight text-white">Director&apos;s Console</h1>
           </div>
           <button className="p-2 text-zinc-400 hover:text-white transition-colors rounded hover:bg-zinc-800">
             <Settings size={18} />
@@ -113,45 +202,34 @@ export default function VibeDirector() {
 
           {/* Chat Messages */}
           <div className="flex-1 p-4 overflow-y-auto space-y-4">
-            <div className="flex gap-3">
-              <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
-                <span className="text-xs font-semibold">AI</span>
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm text-zinc-300 bg-zinc-800/80 p-3 rounded-2xl rounded-tl-sm inline-block">
-                  Ready to direct. Describe the scene you want to generate.
-                </p>
-                <p className="text-xs text-zinc-500 ml-1">10:42 AM</p>
-              </div>
-            </div>
 
-            <div className="flex gap-3 flex-row-reverse">
-              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
-                <span className="text-xs font-semibold">U</span>
-              </div>
-              <div className="space-y-1 flex flex-col items-end">
-                <p className="text-sm text-white bg-indigo-600 p-3 rounded-2xl rounded-tr-sm inline-block shadow-sm">
-                  A lone figure walking through a neon-lit cyberpunk street in the rain. Make it moody.
-                </p>
-                <p className="text-xs text-zinc-500 mr-1">10:43 AM</p>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
-                <span className="text-xs font-semibold">AI</span>
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm text-zinc-300 bg-zinc-800/80 p-3 rounded-2xl rounded-tl-sm inline-block">
-                  <p>Processing request...</p>
-                  <div className="flex gap-1 mt-2">
-                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"></span>
-                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-75"></span>
-                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-150"></span>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                  msg.sender === 'user' ? 'bg-indigo-600' : 'bg-zinc-800'
+                }`}>
+                  <span className="text-xs font-semibold">{msg.sender === 'user' ? 'U' : 'AI'}</span>
+                </div>
+                <div className={`space-y-1 flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`text-sm p-3 inline-block ${
+                    msg.sender === 'user'
+                      ? 'text-white bg-indigo-600 rounded-2xl rounded-tr-sm shadow-sm'
+                      : 'text-zinc-300 bg-zinc-800/80 rounded-2xl rounded-tl-sm'
+                  }`}>
+                    <p>{msg.text}</p>
+                    {msg.isGenerating && (
+                      <div className="flex gap-1 mt-2">
+                        <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"></span>
+                        <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-75"></span>
+                        <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-150"></span>
+                      </div>
+                    )}
                   </div>
+                  <p className="text-xs text-zinc-500 mx-1">{msg.time}</p>
                 </div>
               </div>
-            </div>
+            ))}
+
           </div>
 
           {/* Chat Input */}
@@ -162,10 +240,18 @@ export default function VibeDirector() {
               </button>
               <input
                 type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 placeholder="Direct the scene..."
-                className="w-full bg-zinc-800/80 border border-zinc-700 rounded-full py-3 pl-10 pr-12 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-inner"
+                disabled={isGenerating}
+                className="w-full bg-zinc-800/80 border border-zinc-700 rounded-full py-3 pl-10 pr-12 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-inner disabled:opacity-50"
               />
-              <button className="absolute right-2 p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/20">
+              <button
+                onClick={handleSend}
+                disabled={isGenerating || !input.trim()}
+                className="absolute right-2 p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              >
                 <Send size={16} />
               </button>
             </div>
@@ -180,7 +266,7 @@ export default function VibeDirector() {
         <div className="flex-1 flex items-center justify-center p-8 relative">
 
           {/* Canvas Toolbar overlay */}
-          <div className="absolute top-6 right-6 flex items-center gap-2 bg-zinc-900/80 backdrop-blur-md p-1.5 rounded-lg border border-zinc-800 shadow-xl">
+          <div className="absolute top-6 right-6 flex items-center gap-2 bg-zinc-900/80 backdrop-blur-md p-1.5 rounded-lg border border-zinc-800 shadow-xl z-20">
             <button className="p-2 text-zinc-400 hover:text-white transition-colors rounded hover:bg-zinc-800 tooltip" title="Export">
               <MoreHorizontal size={18} />
             </button>
@@ -189,28 +275,35 @@ export default function VibeDirector() {
           {/* Generated Video/Image Placeholder */}
           <div className="w-full max-w-5xl aspect-video bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col items-center justify-center relative overflow-hidden group">
 
-            {/* Background Grid Pattern for empty state feel */}
-            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay pointer-events-none"></div>
+            {imageUrl ? (
+              // Display generated image
+              <img src={imageUrl} alt="Generated scene" className="w-full h-full object-cover z-10" />
+            ) : (
+              // Empty / Generating state
+              <>
+                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay pointer-events-none"></div>
+                <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/80 via-transparent to-transparent z-10 pointer-events-none"></div>
+                <div className={`absolute inset-0 bg-zinc-800 ${isGenerating ? 'animate-pulse opacity-40' : 'opacity-20'}`}></div>
 
-            <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/80 via-transparent to-transparent z-10 pointer-events-none"></div>
+                <div className="z-20 text-center space-y-4">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto border ${isGenerating ? 'bg-indigo-500/30 border-indigo-500 animate-spin border-t-transparent' : 'bg-indigo-500/20 border-indigo-500/30'}`}>
+                    {!isGenerating && <Play size={24} className="text-indigo-400 ml-1" />}
+                  </div>
+                  <div>
+                    <p className="text-zinc-300 font-medium tracking-wide">
+                      {isGenerating ? 'Directing Scene...' : 'Awaiting Direction'}
+                    </p>
+                    <p className="text-zinc-500 text-sm mt-1">Applying {activeVibe} vibe</p>
+                  </div>
+                </div>
 
-            {/* Placeholder Image (Simulation of generated content) */}
-            <div className="absolute inset-0 bg-zinc-800 animate-pulse opacity-20"></div>
-
-            <div className="z-20 text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center mx-auto border border-indigo-500/30">
-                <Play size={24} className="text-indigo-400 ml-1" />
-              </div>
-              <div>
-                <p className="text-zinc-300 font-medium tracking-wide">Scene 04 Rendering...</p>
-                <p className="text-zinc-500 text-sm mt-1">Applying {activeVibe} vibe</p>
-              </div>
-            </div>
-
-            {/* Progress bar simulation */}
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800 z-20">
-              <div className="h-full bg-indigo-500 w-2/3 shadow-[0_0_10px_rgba(99,102,241,0.8)]"></div>
-            </div>
+                {isGenerating && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800 z-20">
+                    <div className="h-full bg-indigo-500 w-2/3 shadow-[0_0_10px_rgba(99,102,241,0.8)] animate-[pulse_1s_ease-in-out_infinite]"></div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -236,11 +329,14 @@ export default function VibeDirector() {
             ))}
 
             {/* Active/Generating Thumbnail */}
-            <div className="min-w-[160px] h-24 bg-zinc-800/50 rounded-lg border-2 border-indigo-500 relative flex items-center justify-center shrink-0 overflow-hidden shadow-[0_0_15px_rgba(99,102,241,0.15)]">
+            <div className={`min-w-[160px] h-24 rounded-lg border-2 relative flex items-center justify-center shrink-0 overflow-hidden ${isGenerating ? 'bg-zinc-800/50 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.15)]' : 'bg-zinc-800 border-indigo-500/50'}`}>
+               {imageUrl && !isGenerating && (
+                  <img src={imageUrl} alt="Timeline thumbnail" className="w-full h-full object-cover absolute inset-0 opacity-50" />
+               )}
                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
-               <div className="w-6 h-6 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
-               <div className="absolute bottom-2 left-2 text-[10px] font-medium bg-black/60 px-1.5 py-0.5 rounded text-indigo-300 backdrop-blur-md">
-                  Sc 4 (Generating)
+               {isGenerating && <div className="w-6 h-6 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin z-10"></div>}
+               <div className={`absolute bottom-2 left-2 text-[10px] font-medium bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-md z-10 ${isGenerating ? 'text-indigo-300' : 'text-zinc-300'}`}>
+                  Sc 4 {isGenerating && '(Generating)'}
                </div>
             </div>
 
