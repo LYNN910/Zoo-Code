@@ -1,0 +1,6 @@
+gradio
+librosa
+soundfile
+numpy
+gradio_client
+google-genai
